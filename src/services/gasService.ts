@@ -399,22 +399,29 @@ class GasDataService {
       return { success: false, message: qrResult.reason || 'Mã QR không hợp lệ' };
     }
 
-    // 3. Geolocation Radius Verification
-    const configMap = this.getConfigMap();
-    const maxRadius = Number(configMap.BanKinhChamCongMet || 150);
-    const isWithinRadius = distanceMeters <= maxRadius;
+    // 3. Geolocation Radius Verification (dùng tọa độ cấu hình từ Sheet)
+    const clinicGeo = this.getClinicGeo();
+    const maxRadius = clinicGeo.radiusMeters;
+    const distanceFromConfig = calculateHaversineDistance(
+      latitude,
+      longitude,
+      clinicGeo.latitude,
+      clinicGeo.longitude
+    );
+    const effectiveDistance = Number.isFinite(distanceFromConfig) ? distanceFromConfig : distanceMeters;
+    const isWithinRadius = effectiveDistance <= maxRadius;
 
     if (!isWithinRadius) {
       this.addSystemLog(
         maNhanVien,
         `CHAM_CONG_${loaiChamCong}`,
         'CanhBao',
-        `Ngoài bán kính: ${distanceMeters}m (Cho phép ${maxRadius}m)`,
+        `Ngoài bán kính: ${effectiveDistance}m (Cho phép ${maxRadius}m)`,
         deviceInfo
       );
       return {
         success: false,
-        message: `Bạn đang ở cách phòng khám ${distanceMeters}m, vượt quá bán kính quy định (${maxRadius}m). Vui lòng di chuyển đến gần hơn.`,
+        message: `Bạn đang ở cách phòng khám ${effectiveDistance}m, vượt quá bán kính quy định (${maxRadius}m). Vui lòng di chuyển đến gần hơn.`,
       };
     }
 
@@ -494,7 +501,7 @@ class GasDataService {
       CaLamViec: shiftCode,
       ViDo: Number(latitude.toFixed(5)),
       KinhDo: Number(longitude.toFixed(5)),
-      KhoangCachDenPhongKham: Math.round(distanceMeters),
+      KhoangCachDenPhongKham: Math.round(effectiveDistance),
       TrangThai: shiftStatus,
       MaPhienQR: qrResult.nonce || 'QR_TOKEN',
       NguonGhiNhan: 'QR_Web',
@@ -762,15 +769,71 @@ class GasDataService {
     return JSON.parse(localStorage.getItem(STORAGE_KEY_SHIFTS) || '[]');
   }
 
-  public updateShift(updatedShift: WorkShift): boolean {
+  public async fetchShiftsFromGas(): Promise<WorkShift[]> {
+    if (!this.gasUrl) return this.getShifts();
+    try {
+      const response = await fetch(this.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'GET_SHIFT_LIST' }),
+      });
+      const json = await response.json();
+      if (json.status === 'success' && Array.isArray(json.shifts)) {
+        localStorage.setItem(STORAGE_KEY_SHIFTS, JSON.stringify(json.shifts));
+        return json.shifts as WorkShift[];
+      }
+    } catch (err) {
+      console.warn('fetchShiftsFromGas error:', err);
+    }
+    return this.getShifts();
+  }
+
+  public async updateShift(updatedShift: WorkShift): Promise<{ success: boolean; message: string }> {
     const shifts = this.getShifts();
     const idx = shifts.findIndex(s => s.MaCa === updatedShift.MaCa);
     if (idx !== -1) {
       shifts[idx] = updatedShift;
       localStorage.setItem(STORAGE_KEY_SHIFTS, JSON.stringify(shifts));
-      return true;
+    } else {
+      shifts.push(updatedShift);
+      localStorage.setItem(STORAGE_KEY_SHIFTS, JSON.stringify(shifts));
     }
-    return false;
+
+    if (this.gasUrl) {
+      try {
+        const response = await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'UPDATE_SHIFT',
+            ...updatedShift,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+        const json = await response.json();
+        if (json.status === 'success') {
+          await this.fetchShiftsFromGas();
+          return { success: true, message: json.message || 'Đã lưu ca lên Sheets.' };
+        }
+        return { success: false, message: json.message || 'Không lưu được ca lên Sheets.' };
+      } catch (err: any) {
+        return { success: false, message: 'Lỗi kết nối khi lưu ca: ' + (err?.message || String(err)) };
+      }
+    }
+    return { success: true, message: 'Đã lưu ca (local).' };
+  }
+
+  /** Tọa độ + bán kính phòng khám từ cấu hình (Sheet / local) */
+  public getClinicGeo(): { latitude: number; longitude: number; radiusMeters: number } {
+    const map = this.getConfigMap();
+    const latitude = Number(map.ViDoPhongKham);
+    const longitude = Number(map.KinhDoPhongKham);
+    const radiusMeters = Number(map.BanKinhChamCongMet);
+    return {
+      latitude: Number.isFinite(latitude) ? latitude : DEFAULT_CLINIC_LOCATION.latitude,
+      longitude: Number.isFinite(longitude) ? longitude : DEFAULT_CLINIC_LOCATION.longitude,
+      radiusMeters: Number.isFinite(radiusMeters) && radiusMeters > 0 ? radiusMeters : DEFAULT_CLINIC_LOCATION.defaultRadiusMeters,
+    };
   }
 
   public getConfig(): SystemConfig[] {
@@ -786,7 +849,30 @@ class GasDataService {
     return map;
   }
 
-  public updateConfig(key: string, value: string): void {
+  /** Lấy cấu hình (vĩ độ, kinh độ, bán kính...) từ Google Sheets */
+  public async fetchConfigFromGas(): Promise<Record<string, string>> {
+    if (!this.gasUrl) {
+      return this.getConfigMap();
+    }
+    try {
+      const response = await fetch(this.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'GET_CONFIG_LIST' }),
+      });
+      const json = await response.json();
+      if (json.status === 'success' && Array.isArray(json.config)) {
+        localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(json.config));
+        return this.getConfigMap();
+      }
+    } catch (err) {
+      console.warn('fetchConfigFromGas error:', err);
+    }
+    return this.getConfigMap();
+  }
+
+  /** Cập nhật 1 cấu hình — ghi local + Google Sheets */
+  public async updateConfig(key: string, value: string): Promise<{ success: boolean; message: string }> {
     const list = this.getConfig();
     const item = list.find(c => c.TenCauHinh === key);
     if (item) {
@@ -795,6 +881,33 @@ class GasDataService {
       list.push({ TenCauHinh: key, GiaTri: value, MoTa: 'Cấu hình tùy chỉnh' });
     }
     localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(list));
+
+    if (this.gasUrl) {
+      try {
+        const response = await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'UPDATE_CONFIG',
+            key,
+            value,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+        const json = await response.json();
+        if (json.status === 'success') {
+          await this.fetchConfigFromGas();
+          return { success: true, message: json.message || 'Đã lưu cấu hình lên Google Sheets.' };
+        }
+        return { success: false, message: json.message || 'Không ghi được lên Sheets.' };
+      } catch (err: any) {
+        return {
+          success: false,
+          message: 'Lỗi kết nối Sheets khi lưu cấu hình: ' + (err?.message || String(err)),
+        };
+      }
+    }
+    return { success: true, message: 'Đã lưu cấu hình (local).' };
   }
 
   // --- ADJUSTMENT REQUESTS WORKFLOW ---

@@ -60,10 +60,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     const staff = await gasService.fetchStaffFromGas();
     setStaffList(staff);
     setAttendanceRecords(gasService.getAllAttendanceRecords());
-    setShifts(gasService.getShifts());
+    const shifts = await gasService.fetchShiftsFromGas();
+    setShifts(shifts);
     setAdjustmentRequests(gasService.getAdjustmentRequests());
     setSystemLogs(gasService.getSystemLogs());
-    setConfigMap(gasService.getConfigMap());
+    const cfg = await gasService.fetchConfigFromGas();
+    setConfigMap(cfg);
   };
 
   useEffect(() => {
@@ -197,17 +199,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   };
 
   // Save Shift Edits
-  const handleSaveShift = (shift: WorkShift) => {
-    gasService.updateShift(shift);
-    notify(`Đã cập nhật cấu hình ${shift.TenCa}`);
-    refreshAllData();
+  const handleSaveShift = async (shift: WorkShift) => {
+    const res = await gasService.updateShift(shift);
+    if (res.success) {
+      notify(res.message || `Đã cập nhật cấu hình ${shift.TenCa}`);
+      await refreshAllData();
+    } else {
+      alert(res.message || 'Không lưu được ca lên Google Sheets');
+    }
   };
 
   // Save Clinic Geo Config
-  const handleSaveConfig = (key: string, val: string) => {
-    gasService.updateConfig(key, val);
-    notify('Đã cập nhật cấu hình hệ thống');
-    refreshAllData();
+  const handleSaveConfig = async (key: string, val: string) => {
+    const res = await gasService.updateConfig(key, val);
+    if (res.success) {
+      notify(res.message || 'Đã cập nhật cấu hình hệ thống');
+      await refreshAllData();
+    } else {
+      alert(res.message || 'Không lưu được cấu hình lên Google Sheets');
+    }
   };
 
   return (

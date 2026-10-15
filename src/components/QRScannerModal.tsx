@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { X, Camera, SwitchCamera, Upload, AlertCircle, CheckCircle2, MapPin, Loader2 } from 'lucide-react';
 import { getCurrentAttendancePosition, GeolocationResult } from '../services/geo';
+import { gasService } from '../services/gasService';
 import { CheckInType } from '../types';
 
 interface QRScannerModalProps {
@@ -44,7 +45,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const fetchGps = async () => {
     setIsLoadingGeo(true);
     try {
-      const pos = await getCurrentAttendancePosition();
+      await gasService.fetchConfigFromGas();
+      const clinic = gasService.getClinicGeo();
+      const pos = await getCurrentAttendancePosition(
+        clinic.latitude,
+        clinic.longitude,
+        clinic.radiusMeters,
+        false
+      );
       setGeoStatus(pos);
     } catch {
       setGeoStatus(null);
@@ -127,7 +135,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     // Re-verify position at exact punch instant
     let pos = geoStatus;
     if (!pos || !pos.success) {
-      pos = await getCurrentAttendancePosition();
+      const clinic = gasService.getClinicGeo();
+      pos = await getCurrentAttendancePosition(
+        clinic.latitude,
+        clinic.longitude,
+        clinic.radiusMeters,
+        false
+      );
     }
 
     onScanSuccess(qrText, pos);
