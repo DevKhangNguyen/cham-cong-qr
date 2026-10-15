@@ -20,6 +20,22 @@ import { hashPassword, sha256, getDeviceInfo, validateScannedQR, DEFAULT_CLINIC_
 import { calculateHaversineDistance, DEFAULT_CLINIC_LOCATION } from './geo';
 
 const STORAGE_KEY_GAS_URL = 'nha_uyen_gas_url';
+
+/**
+ * URL Web App Google Apps Script dùng chung mọi thiết bị.
+ * Ưu tiên: 1) localStorage (Admin đổi tạm)  2) biến môi trường VITE_GAS_URL  3) hằng số dưới đây
+ *
+ * Cách gắn URL cố định:
+ * - Sửa DEFAULT_GAS_WEBAPP_URL bên dưới = link .../exec của bạn
+ * - HOẶC tạo file .env : VITE_GAS_URL=https://script.google.com/macros/s/xxx/exec
+ * - HOẶC trên Vercel → Settings → Environment Variables → VITE_GAS_URL
+ */
+const DEFAULT_GAS_WEBAPP_URL =
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GAS_URL) ||
+  // ▼▼▼ DÁN URL WEB APP CỦA BẠN VÀO GIỮA HAI DẤU NHÁY (kết thúc bằng /exec) ▼▼▼
+  'https://script.google.com/macros/s/AKfycbyDJn2Mq7NFDyUOn3r6q3iM9uTyKsMy7Qb7l0SSufRM_f3QNiirSmYa-znaCfuaAKYf2A/exec';
+  // ▲▲▲ Ví dụ: 'https://script.google.com/macros/s/AKfycb.../exec' ▲▲▲
+
 const STORAGE_KEY_STAFF = 'nha_uyen_sheet_nhanvien';
 const STORAGE_KEY_ATTENDANCE = 'nha_uyen_sheet_chamcong';
 const STORAGE_KEY_SHIFTS = 'nha_uyen_sheet_calamviec';
@@ -176,7 +192,8 @@ class GasDataService {
   private gasUrl: string = '';
 
   constructor() {
-    this.gasUrl = localStorage.getItem(STORAGE_KEY_GAS_URL) || '';
+    const saved = (localStorage.getItem(STORAGE_KEY_GAS_URL) || '').trim();
+    this.gasUrl = saved || String(DEFAULT_GAS_WEBAPP_URL || '').trim();
     this.initLocalStorage();
   }
 
