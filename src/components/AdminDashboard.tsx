@@ -56,8 +56,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   // Action status message
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
-  const refreshAllData = () => {
-    setStaffList(gasService.getAllStaff());
+  const refreshAllData = async () => {
+    const staff = await gasService.fetchStaffFromGas();
+    setStaffList(staff);
     setAttendanceRecords(gasService.getAllAttendanceRecords());
     setShifts(gasService.getShifts());
     setAdjustmentRequests(gasService.getAdjustmentRequests());
@@ -84,11 +85,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   const lateTodayCount = todayRecords.filter(r => r.TrangThai === 'DiMuon').length;
 
   // Toggle staff lock/unlock
-  const handleToggleLock = (maNhanVien: string) => {
-    const res = gasService.toggleStaffStatus(maNhanVien);
+  const handleToggleLock = async (maNhanVien: string) => {
+    const res = await gasService.toggleStaffStatus(maNhanVien);
     if (res.success) {
       notify(`Đã ${res.status === 'HoatDong' ? 'mở khóa' : 'khóa'} tài khoản ${maNhanVien}`);
-      refreshAllData();
+      await refreshAllData();
+    } else {
+      alert('Không thể đổi trạng thái nhân viên. Kiểm tra kết nối Google Sheets.');
     }
   };
 
@@ -149,7 +152,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       if (res.success) {
         notify('Cập nhật nhân viên thành công!');
         setIsStaffModalOpen(false);
-        refreshAllData();
+        await refreshAllData();
       } else {
         alert(res.message);
       }
@@ -174,7 +177,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       if (res.success) {
         notify('Tạo tài khoản nhân viên thành công!');
         setIsStaffModalOpen(false);
-        refreshAllData();
+        await refreshAllData();
       } else {
         alert(res.message);
       }

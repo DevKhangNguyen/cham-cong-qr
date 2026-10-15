@@ -75,28 +75,32 @@ export const Navbar: React.FC<NavbarProps> = ({
             Lịch sử công
           </button>
 
-          <button
-            onClick={() => onNavigate('admin')}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              currentView === 'admin'
-                ? 'text-sky-900 bg-sky-50'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Shield className="w-4 h-4 text-slate-500" />
-            Quản trị {currentUser?.VaiTro === 'Admin' ? '' : '(Admin)'}
-          </button>
+          {currentUser?.VaiTro === 'Admin' && (
+            <button
+              onClick={() => onNavigate('admin')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                currentView === 'admin'
+                  ? 'text-sky-900 bg-sky-50'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Shield className="w-4 h-4 text-slate-500" />
+              Quản trị
+            </button>
+          )}
 
-          <button
-            onClick={() => onNavigate('gasGuide')}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${
-              currentView === 'gasGuide'
-                ? 'text-sky-900 bg-sky-50'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            Google Sheets
-          </button>
+          {currentUser?.VaiTro === 'Admin' && (
+            <button
+              onClick={() => onNavigate('gasGuide')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${
+                currentView === 'gasGuide'
+                  ? 'text-sky-900 bg-sky-50'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              Google Sheets
+            </button>
+          )}
         </nav>
 
         {/* Zone 3: 1 Primary Action (User profile & Auth) */}
@@ -157,22 +161,26 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           Lịch sử
         </button>
-        <button
-          onClick={() => onNavigate('admin')}
-          className={`py-1 px-2.5 rounded whitespace-nowrap ${
-            currentView === 'admin' ? 'font-semibold text-sky-800 bg-sky-100' : 'text-slate-600'
-          }`}
-        >
-          Quản trị
-        </button>
-        <button
-          onClick={() => onNavigate('gasGuide')}
-          className={`py-1 px-2.5 rounded whitespace-nowrap ${
-            currentView === 'gasGuide' ? 'font-semibold text-sky-800 bg-sky-100' : 'text-slate-600'
-          }`}
-        >
-          Hướng dẫn Sheets
-        </button>
+        {currentUser?.VaiTro === 'Admin' && (
+          <button
+            onClick={() => onNavigate('admin')}
+            className={`py-1 px-2.5 rounded whitespace-nowrap ${
+              currentView === 'admin' ? 'font-semibold text-sky-800 bg-sky-100' : 'text-slate-600'
+            }`}
+          >
+            Quản trị
+          </button>
+        )}
+        {currentUser?.VaiTro === 'Admin' && (
+          <button
+            onClick={() => onNavigate('gasGuide')}
+            className={`py-1 px-2.5 rounded whitespace-nowrap ${
+              currentView === 'gasGuide' ? 'font-semibold text-sky-800 bg-sky-100' : 'text-slate-600'
+            }`}
+          >
+            Hướng dẫn Sheets
+          </button>
+        )}
       </div>
     </header>
   );

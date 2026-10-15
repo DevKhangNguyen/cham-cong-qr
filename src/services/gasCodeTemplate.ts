@@ -528,6 +528,167 @@ function ghiNhatKy(maNhanVien, hanhDong, ketQua, lyDo, thietBi, refId) {
   }
 }
 
+
+/**
+ * Lấy danh sách toàn bộ nhân viên
+ */
+function getStaffList(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NHAN_VIEN);
+  var values = sheet.getDataRange().getValues();
+  var list = [];
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    if (!row[0]) continue;
+    list.push({
+      MaNhanVien: String(row[0]),
+      HoTen: String(row[1] || ''),
+      PhongBan: String(row[2] || ''),
+      ChucVu: String(row[3] || ''),
+      TenDangNhap: String(row[4] || ''),
+      ThongTinXacThuc: String(row[5] || ''),
+      Salt: String(row[6] || ''),
+      VaiTro: String(row[7] || 'NhanVien'),
+      TrangThai: String(row[8] || 'HoatDong'),
+      NgayTao: String(row[9] || '')
+    });
+  }
+  return { status: 'success', staff: list };
+}
+
+/**
+ * Thêm nhân viên mới vào sheet NhanVien
+ * data: MaNhanVien, HoTen, PhongBan, ChucVu, TenDangNhap, passwordPlain, VaiTro, TrangThai
+ */
+function addStaff(data) {
+  var ma = String(data.MaNhanVien || '').trim().toUpperCase();
+  var tenDN = String(data.TenDangNhap || '').trim().toLowerCase();
+  var hoTen = String(data.HoTen || '').trim();
+  var password = String(data.passwordPlain || '');
+
+  if (!ma || !tenDN || !hoTen || !password) {
+    return { status: 'error', message: 'Thiếu thông tin bắt buộc (mã NV, tên đăng nhập, họ tên, mật khẩu).' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NHAN_VIEN);
+  var values = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]).toUpperCase() === ma) {
+      return { status: 'error', message: 'Mã nhân viên đã tồn tại.' };
+    }
+    if (String(values[i][4]).toLowerCase() === tenDN) {
+      return { status: 'error', message: 'Tên đăng nhập đã tồn tại.' };
+    }
+  }
+
+  var salt = 'salt_' + new Date().getTime();
+  var hash = hashSha256(salt + ':' + password + ':' + salt);
+  var now = getFormattedNow();
+
+  sheet.appendRow([
+    ma,
+    hoTen,
+    String(data.PhongBan || ''),
+    String(data.ChucVu || ''),
+    tenDN,
+    hash,
+    salt,
+    String(data.VaiTro || 'NhanVien'),
+    String(data.TrangThai || 'HoatDong'),
+    now
+  ]);
+
+  ghiNhatKy('ADMIN', 'THEM_NHAN_VIEN', 'ThanhCong', 'Thêm ' + ma + ' (' + hoTen + ')', data.deviceInfo || '');
+
+  return {
+    status: 'success',
+    message: 'Tạo tài khoản nhân viên thành công.',
+    staff: {
+      MaNhanVien: ma,
+      HoTen: hoTen,
+      PhongBan: String(data.PhongBan || ''),
+      ChucVu: String(data.ChucVu || ''),
+      TenDangNhap: tenDN,
+      ThongTinXacThuc: hash,
+      Salt: salt,
+      VaiTro: String(data.VaiTro || 'NhanVien'),
+      TrangThai: String(data.TrangThai || 'HoatDong'),
+      NgayTao: now
+    }
+  };
+}
+
+/**
+ * Cập nhật thông tin nhân viên (không đổi TenDangNhap / MaNhanVien)
+ */
+function updateStaff(data) {
+  var ma = String(data.MaNhanVien || '').trim().toUpperCase();
+  if (!ma) return { status: 'error', message: 'Thiếu mã nhân viên.' };
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NHAN_VIEN);
+  var values = sheet.getDataRange().getValues();
+  var rowIndex = -1;
+
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]).toUpperCase() === ma) {
+      rowIndex = i + 1; // 1-based
+      break;
+    }
+  }
+  if (rowIndex === -1) {
+    return { status: 'error', message: 'Không tìm thấy nhân viên.' };
+  }
+
+  if (data.HoTen !== undefined) sheet.getRange(rowIndex, 2).setValue(String(data.HoTen));
+  if (data.PhongBan !== undefined) sheet.getRange(rowIndex, 3).setValue(String(data.PhongBan));
+  if (data.ChucVu !== undefined) sheet.getRange(rowIndex, 4).setValue(String(data.ChucVu));
+  if (data.VaiTro !== undefined) sheet.getRange(rowIndex, 8).setValue(String(data.VaiTro));
+  if (data.TrangThai !== undefined) sheet.getRange(rowIndex, 9).setValue(String(data.TrangThai));
+
+  if (data.newPasswordPlain) {
+    var salt = 'salt_' + new Date().getTime();
+    var hash = hashSha256(salt + ':' + data.newPasswordPlain + ':' + salt);
+    sheet.getRange(rowIndex, 6).setValue(hash);
+    sheet.getRange(rowIndex, 7).setValue(salt);
+  }
+
+  ghiNhatKy('ADMIN', 'CAP_NHAT_NHAN_VIEN', 'ThanhCong', 'Cập nhật ' + ma, data.deviceInfo || '');
+  return { status: 'success', message: 'Cập nhật tài khoản nhân viên thành công.' };
+}
+
+/**
+ * Khóa / mở khóa tài khoản
+ */
+function toggleStaffStatus(data) {
+  var ma = String(data.MaNhanVien || '').trim().toUpperCase();
+  if (!ma) return { status: 'error', message: 'Thiếu mã nhân viên.' };
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NHAN_VIEN);
+  var values = sheet.getDataRange().getValues();
+  var rowIndex = -1;
+  var current = '';
+
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0]).toUpperCase() === ma) {
+      rowIndex = i + 1;
+      current = String(values[i][8] || 'HoatDong');
+      break;
+    }
+  }
+  if (rowIndex === -1) {
+    return { status: 'error', message: 'Không tìm thấy nhân viên.', statusStaff: 'Khoa' };
+  }
+
+  var next = current === 'HoatDong' ? 'Khoa' : 'HoatDong';
+  sheet.getRange(rowIndex, 9).setValue(next);
+  ghiNhatKy('ADMIN', 'DOI_TRANG_THAI_NV', 'ThanhCong', ma + ' -> ' + next, data.deviceInfo || '');
+  return { status: 'success', message: 'Đã cập nhật trạng thái.', statusStaff: next };
+}
+
 /**
  * Hàm băm SHA-256 an toàn trong Google Apps Script
  */

@@ -537,23 +537,82 @@ class GasDataService {
     return JSON.parse(localStorage.getItem(STORAGE_KEY_STAFF) || '[]');
   }
 
-  public async createStaff(newStaffData: Omit<Staff, 'NgayTao'> & { passwordPlain: string }): Promise<{ success: boolean; message: string }> {
-    const list = this.getAllStaff();
-    const cleanUser = newStaffData.TenDangNhap.trim().toLowerCase();
+  /** Lấy danh sách nhân viên từ Google Sheets (nếu đã cấu hình GAS URL) rồi cache local */
+  public async fetchStaffFromGas(): Promise<Staff[]> {
+    if (!this.gasUrl) {
+      return this.getAllStaff();
+    }
+    try {
+      const response = await fetch(this.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'GET_STAFF_LIST' }),
+      });
+      const json = await response.json();
+      if (json.status === 'success' && Array.isArray(json.staff)) {
+        localStorage.setItem(STORAGE_KEY_STAFF, JSON.stringify(json.staff));
+        return json.staff as Staff[];
+      }
+      console.warn('GET_STAFF_LIST failed:', json.message);
+    } catch (err) {
+      console.warn('fetchStaffFromGas error, dùng local:', err);
+    }
+    return this.getAllStaff();
+  }
 
+  public async createStaff(newStaffData: Omit<Staff, 'NgayTao'> & { passwordPlain: string }): Promise<{ success: boolean; message: string }> {
+    const cleanUser = newStaffData.TenDangNhap.trim().toLowerCase();
+    const maNV = newStaffData.MaNhanVien.trim().toUpperCase();
+
+    // Ưu tiên ghi lên Google Sheets nếu đã cấu hình
+    if (this.gasUrl) {
+      try {
+        const response = await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'ADD_STAFF',
+            MaNhanVien: maNV,
+            HoTen: newStaffData.HoTen.trim(),
+            PhongBan: newStaffData.PhongBan,
+            ChucVu: newStaffData.ChucVu,
+            TenDangNhap: cleanUser,
+            passwordPlain: newStaffData.passwordPlain,
+            VaiTro: newStaffData.VaiTro,
+            TrangThai: newStaffData.TrangThai,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+        const json = await response.json();
+        if (json.status === 'success') {
+          // Đồng bộ lại list từ Sheet
+          await this.fetchStaffFromGas();
+          return { success: true, message: json.message || 'Tạo tài khoản nhân viên thành công.' };
+        }
+        return { success: false, message: json.message || 'Không thể tạo nhân viên trên Google Sheets.' };
+      } catch (err: any) {
+        console.warn('ADD_STAFF GAS error:', err);
+        return {
+          success: false,
+          message: 'Lỗi kết nối Google Sheets khi tạo nhân viên: ' + (err?.message || String(err)),
+        };
+      }
+    }
+
+    // Fallback local (chưa cấu hình GAS)
+    const list = this.getAllStaff();
     if (list.some(s => s.TenDangNhap.toLowerCase() === cleanUser)) {
       return { success: false, message: 'Tên đăng nhập đã tồn tại trong hệ thống.' };
     }
-    if (list.some(s => s.MaNhanVien.toUpperCase() === newStaffData.MaNhanVien.toUpperCase())) {
+    if (list.some(s => s.MaNhanVien.toUpperCase() === maNV)) {
       return { success: false, message: 'Mã nhân viên đã tồn tại.' };
     }
 
     const salt = `salt_${Date.now()}`;
     const hash = await hashPassword(newStaffData.passwordPlain, salt);
-
     const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const staff: Staff = {
-      MaNhanVien: newStaffData.MaNhanVien.trim().toUpperCase(),
+      MaNhanVien: maNV,
       HoTen: newStaffData.HoTen.trim(),
       PhongBan: newStaffData.PhongBan,
       ChucVu: newStaffData.ChucVu,
@@ -585,6 +644,32 @@ class GasDataService {
     maNhanVien: string,
     updates: Partial<Staff> & { newPasswordPlain?: string }
   ): Promise<{ success: boolean; message: string }> {
+    if (this.gasUrl) {
+      try {
+        const response = await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'UPDATE_STAFF',
+            MaNhanVien: maNhanVien,
+            ...updates,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+        const json = await response.json();
+        if (json.status === 'success') {
+          await this.fetchStaffFromGas();
+          return { success: true, message: json.message || 'Cập nhật tài khoản nhân viên thành công.' };
+        }
+        return { success: false, message: json.message || 'Không thể cập nhật trên Google Sheets.' };
+      } catch (err: any) {
+        return {
+          success: false,
+          message: 'Lỗi kết nối Google Sheets khi cập nhật: ' + (err?.message || String(err)),
+        };
+      }
+    }
+
     const list = this.getAllStaff();
     const idx = list.findIndex(s => s.MaNhanVien === maNhanVien);
     if (idx === -1) {
@@ -613,7 +698,30 @@ class GasDataService {
     return { success: true, message: 'Cập nhật tài khoản nhân viên thành công.' };
   }
 
-  public toggleStaffStatus(maNhanVien: string): { success: boolean; status: Staff['TrangThai'] } {
+  public async toggleStaffStatus(maNhanVien: string): Promise<{ success: boolean; status: Staff['TrangThai'] }> {
+    if (this.gasUrl) {
+      try {
+        const response = await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'TOGGLE_STAFF_STATUS',
+            MaNhanVien: maNhanVien,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+        const json = await response.json();
+        if (json.status === 'success') {
+          await this.fetchStaffFromGas();
+          return { success: true, status: (json.statusStaff || 'HoatDong') as Staff['TrangThai'] };
+        }
+        return { success: false, status: 'Khoa' };
+      } catch (err) {
+        console.warn('TOGGLE_STAFF_STATUS error:', err);
+        return { success: false, status: 'Khoa' };
+      }
+    }
+
     const list = this.getAllStaff();
     const staff = list.find(s => s.MaNhanVien === maNhanVien);
     if (!staff) return { success: false, status: 'Khoa' };
@@ -623,9 +731,9 @@ class GasDataService {
 
     this.addSystemLog(
       'ADMIN',
-      'DOI_TRANG_THAI_TK',
+      'DOI_TRANG_THAI_NV',
       'ThanhCong',
-      `${staff.TrangThai === 'HoatDong' ? 'Mở khóa' : 'Khóa'} tài khoản ${maNhanVien}`,
+      `${maNhanVien} -> ${staff.TrangThai}`,
       getDeviceInfo()
     );
 

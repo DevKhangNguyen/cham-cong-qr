@@ -44,8 +44,8 @@ export default function App() {
   };
 
   const handleNavigate = (view: AppView) => {
-    if (view === 'admin' && currentUser?.VaiTro !== 'Admin') {
-      window.alert('Bạn không có quyền quản trị.');
+    if ((view === 'admin' || view === 'gasGuide') && currentUser?.VaiTro !== 'Admin') {
+      window.alert('Bạn không có quyền truy cập mục này.');
       return;
     }
     setCurrentView(view);
@@ -82,11 +82,11 @@ export default function App() {
               <AttendanceHistory currentUser={currentUser} />
             )}
 
-            {currentView === 'admin' && (
+            {currentView === 'admin' && currentUser.VaiTro === 'Admin' && (
               <AdminDashboard currentUser={currentUser} />
             )}
 
-            {currentView === 'gasGuide' && (
+            {currentView === 'gasGuide' && currentUser.VaiTro === 'Admin' && (
               <GoogleAppsScriptGuide />
             )}
           </>
