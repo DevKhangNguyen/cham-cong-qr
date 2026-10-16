@@ -77,7 +77,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     setAttendanceRecords(records);
     const shifts = await gasService.fetchShiftsFromGas();
     setShifts(shifts);
-    setAdjustmentRequests(gasService.getAdjustmentRequests());
+    const adjustments = await gasService.fetchAdjustmentsFromGas();
+    setAdjustmentRequests(adjustments);
     setSystemLogs(gasService.getSystemLogs());
     const cfg = await gasService.fetchConfigFromGas();
     setConfigMap(cfg);
@@ -226,15 +227,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   };
 
   // Adjustment Approval Handler
-  const handleReviewAdjustment = (reqId: string, approved: boolean) => {
+  const handleReviewAdjustment = async (reqId: string, approved: boolean) => {
     const note = prompt(
       approved ? 'Nhập ghi chú duyệt (tùy chọn):' : 'Nhập lý do từ chối yêu cầu:'
     );
     if (note === null) return;
 
-    gasService.approveAdjustment(reqId, approved, currentUser.HoTen, note || (approved ? 'Đồng ý duyệt bổ sung' : 'Không đạt yêu cầu'));
+    await gasService.approveAdjustment(reqId, approved, currentUser.HoTen, note || (approved ? 'Đồng ý duyệt bổ sung' : 'Không đạt yêu cầu'));
     notify(approved ? 'Đã duyệt bổ sung công' : 'Đã từ chối yêu cầu');
-    refreshAllData();
+    await refreshAllData();
   };
 
   // Save Shift Edits

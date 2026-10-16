@@ -1094,6 +1094,26 @@ class GasDataService {
       newReq.id
     );
 
+    // Đồng bộ yêu cầu lên Google Sheets (nền)
+    if (this.gasUrl) {
+      fetch(this.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'SUBMIT_ADJUSTMENT',
+          id: newReq.id,
+          maNhanVien: newReq.maNhanVien,
+          hoTen: newReq.hoTen,
+          ngayChamCong: newReq.ngayChamCong,
+          gioChamCong: newReq.gioChamCong,
+          loaiChamCong: newReq.loaiChamCong,
+          caLamViec: newReq.caLamViec,
+          lyDo: newReq.lyDo,
+          deviceInfo: getDeviceInfo(),
+        }),
+      }).catch(e => console.warn('Sync adjustment to GAS failed:', e));
+    }
+
     return newReq;
   }
 
@@ -1101,12 +1121,42 @@ class GasDataService {
     return JSON.parse(localStorage.getItem(STORAGE_KEY_ADJUSTMENTS) || '[]');
   }
 
-  public approveAdjustment(
+  /** Tải danh sách yêu cầu bù công từ Google Sheets, gộp với local. */
+  public async fetchAdjustmentsFromGas(): Promise<AdjustmentRequest[]> {
+    if (!this.gasUrl) return this.getAdjustmentRequests();
+    try {
+      const response = await fetch(this.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'GET_ADJUSTMENT_LIST' }),
+      });
+      const json = await response.json();
+      if (json.status === 'success' && Array.isArray(json.requests)) {
+        const byId = new Map<string, AdjustmentRequest>();
+        for (const r of json.requests as AdjustmentRequest[]) {
+          byId.set(r.id, r);
+        }
+        for (const r of this.getAdjustmentRequests()) {
+          if (!byId.has(r.id)) byId.set(r.id, r);
+        }
+        const merged = Array.from(byId.values()).sort((a, b) =>
+          (b.ngayTao || '').localeCompare(a.ngayTao || '')
+        );
+        localStorage.setItem(STORAGE_KEY_ADJUSTMENTS, JSON.stringify(merged));
+        return merged;
+      }
+    } catch (err) {
+      console.warn('fetchAdjustmentsFromGas error:', err);
+    }
+    return this.getAdjustmentRequests();
+  }
+
+  public async approveAdjustment(
     reqId: string,
     approved: boolean,
     adminName: string,
     note: string
-  ): boolean {
+  ): Promise<boolean> {
     const list = this.getAdjustmentRequests();
     const req = list.find(r => r.id === reqId);
     if (!req) return false;
@@ -1117,8 +1167,26 @@ class GasDataService {
     req.ghiChuDuyet = note;
     localStorage.setItem(STORAGE_KEY_ADJUSTMENTS, JSON.stringify(list));
 
-    if (approved) {
-      // Append an official attendance record with source 'DieuChinh_Admin'
+    // Đồng bộ quyết định lên Google Sheets
+    if (this.gasUrl) {
+      try {
+        await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'APPROVE_ADJUSTMENT',
+            id: reqId,
+            approved,
+            adminName,
+            note,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+      } catch (e) {
+        console.warn('Sync approve adjustment to GAS failed:', e);
+      }
+    } else if (approved) {
+      // Không có URL Sheets: ghi bản ghi chấm công cục bộ
       const attendanceList = this.getAllAttendanceRecords();
       const newRecord: AttendanceRecord = {
         MaBanGhi: `CC-ADJ-${Date.now()}`,

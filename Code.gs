@@ -19,6 +19,7 @@ var SHEET_CHAM_CONG   = 'ChamCong';
 var SHEET_CA_LAM_VIEC = 'CaLamViec';
 var SHEET_CAU_HINH    = 'CauHinh';
 var SHEET_NHAT_KY     = 'NhatKyHeThong';
+var SHEET_DIEU_CHINH  = 'DieuChinh';
 
 var TIMEZONE = 'Asia/Ho_Chi_Minh';
 var CLINIC_ID = 'PKDK_NHA_UYEN_CAMAU';
@@ -160,6 +161,9 @@ function doGet(e) {
       case 'GET_ATTENDANCE_LIST':
         result = getAttendanceList(params);
         break;
+      case 'GET_ADJUSTMENT_LIST':
+        result = getAdjustmentList(params);
+        break;
       default:
         result = { status: 'error', message: 'Hành động GET không được hỗ trợ: ' + action };
     }
@@ -197,6 +201,9 @@ function doPost(e) {
       case 'TOGGLE_STAFF_STATUS':  result = toggleStaffStatus(data); break;
       case 'DELETE_STAFF':         result = deleteStaff(data); break;
       case 'GET_ATTENDANCE_LIST':  result = getAttendanceList(data); break;
+      case 'SUBMIT_ADJUSTMENT':    result = requestAttendanceAdjustment(data); break;
+      case 'GET_ADJUSTMENT_LIST':  result = getAdjustmentList(data); break;
+      case 'APPROVE_ADJUSTMENT':   result = approveAttendanceAdjustment(data); break;
       case 'GET_SHIFT_LIST':       result = getShiftList(data); break;
       case 'UPDATE_SHIFT':         result = updateShiftRow(data); break;
       case 'GET_CONFIG_LIST':      result = getConfigList(data); break;
@@ -687,6 +694,162 @@ function updateShiftRow(data) {
 
   ghiNhatKy('ADMIN', 'UPDATE_SHIFT', 'ThanhCong', 'Cập nhật ca ' + maCa, data.deviceInfo || '');
   return { status: 'success', message: 'Đã lưu ca lên Sheets.' };
+}
+
+/* =========================================================================
+ * 8b. YÊU CẦU ĐIỀU CHỈNH / BÙ CÔNG (sheet DieuChinh)
+ * ========================================================================= */
+
+function getOrCreateAdjustmentSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DIEU_CHINH);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_DIEU_CHINH);
+    sheet.appendRow([
+      'MaYeuCau', 'MaNhanVien', 'HoTen', 'NgayChamCong', 'GioChamCong',
+      'LoaiChamCong', 'CaLamViec', 'LyDo', 'TrangThai', 'NgayTao',
+      'NguoiDuyet', 'NgayDuyet', 'GhiChuDuyet'
+    ]);
+    styleHeaderRow(sheet, '#0B4B82');
+  }
+  return sheet;
+}
+
+// Web gửi: { action:'SUBMIT_ADJUSTMENT', id, maNhanVien, hoTen, ngayChamCong,
+//            gioChamCong, loaiChamCong, caLamViec, lyDo, deviceInfo }
+function requestAttendanceAdjustment(data) {
+  var maNV = String(data.maNhanVien || '').trim();
+  if (!maNV || !data.ngayChamCong) {
+    return { status: 'error', message: 'Thiếu thông tin yêu cầu bù công.' };
+  }
+
+  var id = String(data.id || ('ADJ-' + Date.now()));
+  var ngay = normalizeDateString(data.ngayChamCong);
+  var gio = normalizeClockString(data.gioChamCong);
+  var loai = String(data.loaiChamCong || 'VaoCa');
+  var ca = String(data.caLamViec || 'CaSang');
+  var lyDo = String(data.lyDo || '');
+  var hoTen = String(data.hoTen || '');
+  var ngayTao = getFormattedNow();
+
+  var sheet = getOrCreateAdjustmentSheet();
+
+  // Chống gửi trùng cùng mã yêu cầu
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === id && rows[i][0] !== '') {
+      return { status: 'success', message: 'Yêu cầu đã tồn tại.' };
+    }
+  }
+
+  sheet.appendRow([
+    id, maNV, hoTen, ngay, gio, loai, ca, lyDo, 'ChoDuyet', ngayTao, '', '', ''
+  ]);
+
+  ghiNhatKy(maNV, 'YEU_CAU_DIEU_CHINH', 'ThanhCong',
+    'Yêu cầu bổ sung chấm công ngày ' + ngay + ': ' + lyDo, data.deviceInfo || '', id);
+
+  return {
+    status: 'success',
+    message: 'Đã gửi yêu cầu bổ sung công.',
+    request: {
+      id: id, maNhanVien: maNV, hoTen: hoTen, ngayChamCong: ngay,
+      gioChamCong: gio, loaiChamCong: loai, caLamViec: ca, lyDo: lyDo,
+      trangThai: 'ChoDuyet', ngayTao: ngayTao
+    }
+  };
+}
+
+// Web mong đợi: { status:'success', requests:[ AdjustmentRequest ] }
+function getAdjustmentList() {
+  var sheet = getOrCreateAdjustmentSheet();
+  var rows = sheet.getDataRange().getValues();
+  var list = [];
+  for (var i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    list.push({
+      id: String(rows[i][0]),
+      maNhanVien: String(rows[i][1] || ''),
+      hoTen: String(rows[i][2] || ''),
+      ngayChamCong: normalizeDateString(rows[i][3]),
+      gioChamCong: normalizeClockString(rows[i][4]),
+      loaiChamCong: String(rows[i][5] || 'VaoCa'),
+      caLamViec: String(rows[i][6] || 'CaSang'),
+      lyDo: String(rows[i][7] || ''),
+      trangThai: String(rows[i][8] || 'ChoDuyet'),
+      ngayTao: rows[i][9] ? formatDateTimeValue(rows[i][9]) : '',
+      nguoiDuyet: String(rows[i][10] || ''),
+      ngayDuyet: rows[i][11] ? formatDateTimeValue(rows[i][11]) : '',
+      ghiChuDuyet: String(rows[i][12] || '')
+    });
+  }
+  return { status: 'success', requests: list };
+}
+
+// Web gửi: { action:'APPROVE_ADJUSTMENT', id, approved, adminName, note, deviceInfo }
+function approveAttendanceAdjustment(data) {
+  var id = String(data.id || '');
+  if (!id) return { status: 'error', message: 'Thiếu mã yêu cầu.' };
+
+  var approved = data.approved === true || data.approved === 'true';
+  var admin = String(data.adminName || 'Admin');
+  var note = String(data.note || '');
+  var now = getFormattedNow();
+
+  var sheet = getOrCreateAdjustmentSheet();
+  var rows = sheet.getDataRange().getValues();
+  var foundRow = -1;
+  var req = null;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === id) {
+      foundRow = i + 1;
+      req = {
+        maNhanVien: String(rows[i][1] || ''),
+        hoTen: String(rows[i][2] || ''),
+        ngayChamCong: normalizeDateString(rows[i][3]),
+        gioChamCong: normalizeClockString(rows[i][4]),
+        loaiChamCong: String(rows[i][5] || 'VaoCa'),
+        caLamViec: String(rows[i][6] || 'CaSang'),
+        lyDo: String(rows[i][7] || '')
+      };
+      break;
+    }
+  }
+  if (foundRow === -1) return { status: 'error', message: 'Không tìm thấy yêu cầu.' };
+
+  sheet.getRange(foundRow, 9).setValue(approved ? 'DaDuyet' : 'TuChoi');
+  sheet.getRange(foundRow, 11).setValue(admin);
+  sheet.getRange(foundRow, 12).setValue(now);
+  sheet.getRange(foundRow, 13).setValue(note);
+
+  if (approved) {
+    // Ghi bản ghi chấm công chính thức (nguồn Điều chỉnh)
+    var sChamCong = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_CHAM_CONG);
+    if (sChamCong) {
+      var config = getConfigMap();
+      var maBanGhi = 'CC-ADJ-' + Date.now();
+      sChamCong.appendRow([
+        maBanGhi, req.maNhanVien, req.hoTen, 'Ngoại lệ', req.ngayChamCong,
+        req.gioChamCong, req.loaiChamCong, req.caLamViec,
+        toNumber(config.ViDoPhongKham, 9.3789), toNumber(config.KinhDoPhongKham, 105.1186),
+        0, 'DaDieuChinh', 'ADMIN_APPROVED', 'DieuChinh_Admin',
+        'Admin ' + admin + ' duyệt: ' + req.lyDo + ' (' + note + ')'
+      ]);
+    }
+  }
+
+  ghiNhatKy('ADMIN', approved ? 'DUYET_DIEU_CHINH' : 'TU_CHOI_DIEU_CHINH', 'ThanhCong',
+    'Yêu cầu ' + id + ' của ' + (req ? req.hoTen : '') + ': ' + note, data.deviceInfo || '', id);
+
+  return {
+    status: 'success',
+    message: approved ? 'Đã duyệt bổ sung công.' : 'Đã từ chối yêu cầu.',
+    id: id,
+    trangThai: approved ? 'DaDuyet' : 'TuChoi',
+    nguoiDuyet: admin,
+    ngayDuyet: now,
+    ghiChuDuyet: note
+  };
 }
 
 /* =========================================================================
