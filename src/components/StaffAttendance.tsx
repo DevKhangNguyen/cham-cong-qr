@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Staff, AttendanceRecord, CheckInType, ShiftCode } from '../types';
-import { gasService } from '../services/gasService';
+import { Staff, AttendanceRecord, CheckInType, ShiftCode, WorkShift } from '../types';
+import { gasService, resolveShift } from '../services/gasService';
 import { QRScannerModal } from './QRScannerModal';
 import { GeolocationResult, getCurrentAttendancePosition } from '../services/geo';
 import {
@@ -15,6 +15,7 @@ import {
   QrCode,
   ShieldCheck,
   Send,
+  RefreshCw,
 } from 'lucide-react';
 
 interface StaffAttendanceProps {
@@ -30,6 +31,7 @@ export const StaffAttendance: React.FC<StaffAttendanceProps> = ({
 }) => {
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
+  const [shifts, setShifts] = useState<WorkShift[]>([]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [activeCheckType, setActiveCheckType] = useState<CheckInType>('VaoCa');
   const [feedbackMessage, setFeedbackMessage] = useState<{
@@ -61,38 +63,43 @@ export const StaffAttendance: React.FC<StaffAttendanceProps> = ({
     setTodayRecords(records);
   };
 
+  // Manual sync of shift config with Google Sheets
+  const handleSyncShift = async () => {
+    const list = await gasService.fetchShiftsFromGas();
+    setShifts(list);
+    loadTodayData();
+    setFeedbackMessage({ type: 'success', text: 'Đã cập nhật cấu hình ca mới nhất từ Google Sheets' });
+  };
+
   useEffect(() => {
     loadTodayData();
   }, [currentUser.MaNhanVien]);
 
-  // Determine current active shift
-  const getCurrentShiftInfo = () => {
-    const hours = currentTime.getHours();
-    const minutes = currentTime.getMinutes();
-    const totalMinutes = hours * 60 + minutes;
+  // Load shift configuration from Google Sheets (hoặc local) so the web matches the sheet
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const list = await gasService.fetchShiftsFromGas();
+      if (active) setShifts(list);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
-    if (totalMinutes >= 360 && totalMinutes < 720) {
-      return {
-        name: 'Ca Sáng (07:00 - 11:30)',
-        code: 'CaSang',
-        status: totalMinutes > 435 ? 'Đã quá giờ vào ca (Tính đi muộn)' : 'Đang trong giờ làm việc',
-        isLateWindow: totalMinutes > 435,
-      };
-    } else if (totalMinutes >= 720 && totalMinutes < 1020) {
-      return {
-        name: 'Ca Chiều (13:00 - 17:00)',
-        code: 'CaChieu',
-        status: totalMinutes > 795 ? 'Đã quá giờ vào ca (Tính đi muộn)' : 'Đang trong giờ làm việc',
-        isLateWindow: totalMinutes > 795,
-      };
-    } else {
-      return {
-        name: 'Ca Trực Đêm / Cấp Cứu (17:00 - 07:00)',
-        code: 'CaTruc',
-        status: 'Khung giờ trực trực chiến & cấp cứu',
-        isLateWindow: false,
-      };
-    }
+  // Determine current active shift (theo cấu hình ca trong Sheet)
+  const getCurrentShiftInfo = () => {
+    const totalMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+    const resolved = resolveShift(totalMinutes, 'VaoCa', shifts);
+    const timeRange = `${resolved.GioBatDau} - ${resolved.GioKetThuc}`;
+    return {
+      name: `${resolved.TenCa} (${timeRange})`,
+      code: resolved.MaCa,
+      status: resolved.isLate
+        ? `Đã quá giờ vào ca (Tính đi muộn ${resolved.diffMinutes} phút)`
+        : 'Đang trong giờ làm việc',
+      isLateWindow: resolved.isLate,
+    };
   };
 
   const currentShift = getCurrentShiftInfo();
@@ -216,7 +223,14 @@ export const StaffAttendance: React.FC<StaffAttendanceProps> = ({
             <span>Ca hiện tại: <strong className="text-sky-900">{currentShift.name}</strong></span>
           </div>
 
-          <div className="text-slate-500 font-medium flex items-center gap-1.5">
+          <div className="text-slate-500 font-medium flex items-center gap-2">
+            <button
+              onClick={handleSyncShift}
+              title="Đồng bộ cấu hình ca mới nhất từ Google Sheets"
+              className="p-1.5 text-slate-500 hover:text-sky-700 hover:bg-slate-100 rounded-md transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
             <span className={currentShift.isLateWindow ? 'text-amber-700 font-semibold' : 'text-emerald-700'}>
               {currentShift.status}
             </span>

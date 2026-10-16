@@ -188,6 +188,100 @@ export const INITIAL_CONFIG: SystemConfig[] = [
   },
 ];
 
+// --- SHIFT RESOLUTION DỰA TRÊN CẤU HÌNH CA TỪ SHEET ---
+export interface ResolvedShift {
+  MaCa: ShiftCode;
+  TenCa: string;
+  GioBatDau: string;
+  GioKetThuc: string;
+  isLate: boolean;
+  isEarlyLeave: boolean;
+  diffMinutes: number;
+}
+
+function hhmmToMinutes(hhmm: string): number {
+  const parts = String(hhmm || '').split(':');
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
+  return h * 60 + m;
+}
+
+function circularDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 1440;
+  return Math.min(d, 1440 - d);
+}
+
+// offset có dấu từ anchor -> time trong khoảng (-720, 720]; dương = time sau anchor
+function signedOffset(time: number, anchor: number): number {
+  return ((time - anchor + 1440 + 720) % 1440) - 720;
+}
+
+/**
+ * Chọn ca + tính đi muộn / về sớm theo danh sách ca cấu hình trong sheet.
+ * - Vào ca: chọn ca có giờ bắt đầu gần nhất; trễ nếu vượt quá ThoiGianChoPhepTre.
+ * - Ra ca:  chọn ca có giờ kết thúc gần nhất; về sớm nếu vượt quá ThoiGianChoPhepSom.
+ */
+export function resolveShift(
+  totalMinutes: number,
+  loaiChamCong: CheckInType,
+  shifts: WorkShift[]
+): ResolvedShift {
+  const active = (shifts || []).filter(s => s.TrangThai !== 'TamDung');
+
+  if (active.length === 0) {
+    return { MaCa: 'CaSang', TenCa: 'Ca Sáng', GioBatDau: '07:00', GioKetThuc: '11:30', isLate: false, isEarlyLeave: false, diffMinutes: 0 };
+  }
+
+  let best: WorkShift | null = null;
+  let bestDist = Infinity;
+  for (const s of active) {
+    const anchor = loaiChamCong === 'VaoCa' ? hhmmToMinutes(s.GioBatDau) : hhmmToMinutes(s.GioKetThuc);
+    if (!Number.isFinite(anchor)) continue;
+    const d = circularDistance(totalMinutes, anchor);
+    if (d < bestDist) {
+      bestDist = d;
+      best = s;
+    }
+  }
+
+  if (!best) {
+    return { MaCa: 'CaSang', TenCa: 'Ca Sáng', GioBatDau: '07:00', GioKetThuc: '11:30', isLate: false, isEarlyLeave: false, diffMinutes: 0 };
+  }
+
+  let isLate = false;
+  let isEarlyLeave = false;
+  let diff = 0;
+
+  if (loaiChamCong === 'VaoCa') {
+    const start = hhmmToMinutes(best.GioBatDau);
+    const allowLate = Number(best.ThoiGianChoPhepTre) || 0;
+    const off = signedOffset(totalMinutes, start); // dương = sau giờ bắt đầu
+    if (off > allowLate) {
+      isLate = true;
+      diff = off;
+    }
+  } else {
+    const end = hhmmToMinutes(best.GioKetThuc);
+    const allowEarly = Number(best.ThoiGianChoPhepSom) || 0;
+    const off = signedOffset(end, totalMinutes); // dương = trước giờ kết thúc
+    if (off > allowEarly) {
+      isEarlyLeave = true;
+      diff = off;
+    }
+  }
+
+  return {
+    MaCa: best.MaCa,
+    TenCa: best.TenCa,
+    GioBatDau: best.GioBatDau,
+    GioKetThuc: best.GioKetThuc,
+    isLate,
+    isEarlyLeave,
+    diffMinutes: diff,
+  };
+}
+
 class GasDataService {
   private gasUrl: string = '';
 
@@ -453,36 +547,23 @@ class GasDataService {
       }
     }
 
-    // 6. Determine Shift & Late / Early status
-    let shiftCode: ShiftCode = 'CaSang';
+    // 6. Determine Shift & Late / Early status (theo cấu hình ca từ Sheet)
+    const shifts = this.getShifts();
+    const resolved = resolveShift(totalMinutes, loaiChamCong, shifts);
+    const shiftCode: ShiftCode = resolved.MaCa;
     let shiftStatus: AttendanceRecord['TrangThai'] = 'HopLe';
     let note = '';
 
-    if (totalMinutes >= 360 && totalMinutes < 720) {
-      // Morning: 07:00 - 11:30 (grace 15 min -> 07:15)
-      shiftCode = 'CaSang';
-      if (loaiChamCong === 'VaoCa' && totalMinutes > 435) {
-        shiftStatus = 'DiMuon';
-        note = `Đi muộn ${totalMinutes - 420} phút`;
-      } else if (loaiChamCong === 'RaCa' && totalMinutes < 675) {
-        shiftStatus = 'VeSom';
-        note = `Về sớm ${690 - totalMinutes} phút`;
-      }
-    } else if (totalMinutes >= 720 && totalMinutes < 1020) {
-      // Afternoon: 13:00 - 17:00 (grace 15 min -> 13:15)
-      shiftCode = 'CaChieu';
-      if (loaiChamCong === 'VaoCa' && totalMinutes > 795) {
-        shiftStatus = 'DiMuon';
-        note = `Đi muộn ${totalMinutes - 780} phút`;
-      } else if (loaiChamCong === 'RaCa' && totalMinutes < 1005) {
-        shiftStatus = 'VeSom';
-        note = `Về sớm ${1020 - totalMinutes} phút`;
-      }
-    } else {
-      // Night duty / On call
-      shiftCode = 'CaTruc';
-      shiftStatus = 'HopLe';
+    if (resolved.isLate) {
+      shiftStatus = 'DiMuon';
+      note = `Đi muộn ${resolved.diffMinutes} phút`;
+    } else if (resolved.isEarlyLeave) {
+      shiftStatus = 'VeSom';
+      note = `Về sớm ${resolved.diffMinutes} phút`;
+    } else if (resolved.MaCa === 'CaTruc') {
       note = 'Ca trực đêm / cấp cứu';
+    } else {
+      note = 'Chấm công bình thường';
     }
 
     // 7. Create Record
@@ -762,6 +843,57 @@ class GasDataService {
     );
 
     return { success: true, status: staff.TrangThai };
+  }
+
+  public async deleteStaff(maNhanVien: string): Promise<{ success: boolean; message: string }> {
+    const ma = maNhanVien.trim().toUpperCase();
+
+    if (this.gasUrl) {
+      try {
+        const response = await fetch(this.gasUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'DELETE_STAFF',
+            MaNhanVien: ma,
+            deviceInfo: getDeviceInfo(),
+          }),
+        });
+        const json = await response.json();
+        if (json.status === 'success') {
+          await this.fetchStaffFromGas();
+          return { success: true, message: json.message || 'Đã xóa nhân viên.' };
+        }
+        return { success: false, message: json.message || 'Không thể xóa nhân viên trên Google Sheets.' };
+      } catch (err: any) {
+        return {
+          success: false,
+          message: 'Lỗi kết nối Google Sheets khi xóa: ' + (err?.message || String(err)),
+        };
+      }
+    }
+
+    const list = this.getAllStaff();
+    const target = list.find(s => s.MaNhanVien.toUpperCase() === ma);
+    if (!target) {
+      return { success: false, message: 'Không tìm thấy nhân viên.' };
+    }
+    if (target.VaiTro === 'Admin') {
+      return { success: false, message: 'Không thể xóa tài khoản Quản trị viên.' };
+    }
+
+    const remaining = list.filter(s => s.MaNhanVien.toUpperCase() !== ma);
+    localStorage.setItem(STORAGE_KEY_STAFF, JSON.stringify(remaining));
+
+    this.addSystemLog(
+      'ADMIN',
+      'XOA_NHAN_VIEN',
+      'ThanhCong',
+      `Xóa nhân viên ${target.MaNhanVien} (${target.HoTen})`,
+      getDeviceInfo()
+    );
+
+    return { success: true, message: 'Đã xóa nhân viên.' };
   }
 
   // --- SHIFTS & CONFIG ---

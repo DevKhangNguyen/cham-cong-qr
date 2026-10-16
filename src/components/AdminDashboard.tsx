@@ -12,6 +12,7 @@ import {
   Lock,
   Unlock,
   Edit2,
+  Trash2,
   Check,
   X,
   Download,
@@ -19,6 +20,7 @@ import {
   Settings,
   HelpCircle,
   FileCheck,
+  RefreshCw,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -55,6 +57,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
   // Action status message
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Manual sync with Google Sheets
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      await refreshAllData();
+      notify('Đã đồng bộ dữ liệu mới nhất từ Google Sheets');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const refreshAllData = async () => {
     const staff = await gasService.fetchStaffFromGas();
@@ -94,6 +108,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       await refreshAllData();
     } else {
       alert('Không thể đổi trạng thái nhân viên. Kiểm tra kết nối Google Sheets.');
+    }
+  };
+
+  // Delete staff (permanently remove)
+  const handleDeleteStaff = async (staff: Staff) => {
+    if (staff.VaiTro === 'Admin') {
+      alert('Không thể xóa tài khoản Quản trị viên.');
+      return;
+    }
+    if (staff.MaNhanVien === currentUser.MaNhanVien) {
+      alert('Không thể xóa tài khoản đang đăng nhập.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Bạn có chắc muốn xóa nhân viên ${staff.HoTen} (${staff.MaNhanVien})?\nHành động này không thể hoàn tác.`
+    );
+    if (!confirmed) return;
+
+    const res = await gasService.deleteStaff(staff.MaNhanVien);
+    if (res.success) {
+      notify(`Đã xóa nhân viên ${staff.MaNhanVien}`);
+      await refreshAllData();
+    } else {
+      alert(res.message);
     }
   };
 
@@ -235,6 +273,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleSync}
+              disabled={isSyncing}
+              title="Tải lại dữ liệu mới nhất từ Google Sheets"
+              className="px-3 py-1.5 text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 transition-colors flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-wait"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ từ Sheets'}
+            </button>
             <button
               onClick={() => {
                 const csv = gasService.exportAttendanceCSV(attendanceRecords);
@@ -499,6 +546,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                         ) : (
                           <Unlock className="w-3.5 h-3.5" />
                         )}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteStaff(staff)}
+                        disabled={staff.VaiTro === 'Admin' || staff.MaNhanVien === currentUser.MaNhanVien}
+                        title="Xóa nhân viên"
+                        className="p-1 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-500"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
                   </tr>
