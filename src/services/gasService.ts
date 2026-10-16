@@ -311,45 +311,7 @@ class GasDataService {
       localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(INITIAL_CONFIG));
     }
     if (!localStorage.getItem(STORAGE_KEY_ATTENDANCE)) {
-      // Seed some realistic previous attendance records for illustration
-      const today = new Date().toISOString().split('T')[0];
-      const initialLogs: AttendanceRecord[] = [
-        {
-          MaBanGhi: 'CC-20261014-065812-101',
-          MaNhanVien: 'NV-001',
-          HoTen: 'BS.CKI Nguyễn Văn An',
-          PhongBan: 'Khoa Khám Bệnh',
-          NgayChamCong: today,
-          GioChamCong: '06:58:12',
-          LoaiChamCong: 'VaoCa',
-          CaLamViec: 'CaSang',
-          ViDo: 9.37892,
-          KinhDo: 105.11865,
-          KhoangCachDenPhongKham: 18,
-          TrangThai: 'HopLe',
-          MaPhienQR: 'NONCE-01A',
-          NguonGhiNhan: 'QR_Web',
-          GhiChu: 'Đúng giờ',
-        },
-        {
-          MaBanGhi: 'CC-20261014-071845-102',
-          MaNhanVien: 'NV-002',
-          HoTen: 'ĐD. Trần Thị Hoa',
-          PhongBan: 'Khoa Cấp Cứu',
-          NgayChamCong: today,
-          GioChamCong: '07:18:45',
-          LoaiChamCong: 'VaoCa',
-          CaLamViec: 'CaSang',
-          ViDo: 9.37885,
-          KinhDo: 105.11858,
-          KhoangCachDenPhongKham: 24,
-          TrangThai: 'DiMuon',
-          MaPhienQR: 'NONCE-02B',
-          NguonGhiNhan: 'QR_Web',
-          GhiChu: 'Đi muộn 18 phút',
-        },
-      ];
-      localStorage.setItem(STORAGE_KEY_ATTENDANCE, JSON.stringify(initialLogs));
+      localStorage.setItem(STORAGE_KEY_ATTENDANCE, JSON.stringify([]));
     }
     if (!localStorage.getItem(STORAGE_KEY_LOGS)) {
       const initLogs: SystemLog[] = [
@@ -648,19 +610,12 @@ class GasDataService {
       });
       const json = await response.json();
       if (json.status === 'success' && Array.isArray(json.records)) {
-        const byId = new Map<string, AttendanceRecord>();
-        for (const r of json.records as AttendanceRecord[]) {
-          byId.set(r.MaBanGhi, r);
-        }
-        // Giữ lại bản ghi local chưa kịp đồng bộ (nếu có)
-        for (const r of this.getAllAttendanceRecords()) {
-          if (!byId.has(r.MaBanGhi)) byId.set(r.MaBanGhi, r);
-        }
-        const merged = Array.from(byId.values()).sort((a, b) =>
+        // Sheet là nguồn dữ liệu gốc: ghi đè để web khớp tuyệt đối với Google Sheets
+        const records = (json.records as AttendanceRecord[]).sort((a, b) =>
           (b.NgayChamCong + ' ' + b.GioChamCong).localeCompare(a.NgayChamCong + ' ' + a.GioChamCong)
         );
-        localStorage.setItem(STORAGE_KEY_ATTENDANCE, JSON.stringify(merged));
-        return merged;
+        localStorage.setItem(STORAGE_KEY_ATTENDANCE, JSON.stringify(records));
+        return records;
       }
     } catch (err) {
       console.warn('fetchAttendanceFromGas error:', err);
