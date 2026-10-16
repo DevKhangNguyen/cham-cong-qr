@@ -157,6 +157,9 @@ function doGet(e) {
       case 'GET_STAFF_LIST':
         result = getStaffList(params);
         break;
+      case 'GET_ATTENDANCE_LIST':
+        result = getAttendanceList(params);
+        break;
       default:
         result = { status: 'error', message: 'Hành động GET không được hỗ trợ: ' + action };
     }
@@ -193,6 +196,7 @@ function doPost(e) {
       case 'UPDATE_STAFF':         result = updateStaff(data); break;
       case 'TOGGLE_STAFF_STATUS':  result = toggleStaffStatus(data); break;
       case 'DELETE_STAFF':         result = deleteStaff(data); break;
+      case 'GET_ATTENDANCE_LIST':  result = getAttendanceList(data); break;
       case 'GET_SHIFT_LIST':       result = getShiftList(data); break;
       case 'UPDATE_SHIFT':         result = updateShiftRow(data); break;
       case 'GET_CONFIG_LIST':      result = getConfigList(data); break;
@@ -479,6 +483,38 @@ function getStaffList() {
     });
   }
   return { status: 'success', staff: list };
+}
+
+// Web mong đợi: { status:'success', records:[ AttendanceRecord PascalCase ] }
+function getAttendanceList() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_CHAM_CONG);
+  if (!sheet) return { status: 'error', message: 'Không tìm thấy sheet ChamCong' };
+
+  var rows = sheet.getDataRange().getValues();
+  var display = sheet.getDataRange().getDisplayValues();
+  var records = [];
+  for (var i = 1; i < rows.length; i++) {
+    if (!rows[i][0]) continue;
+    var d = display[i] || rows[i];
+    records.push({
+      MaBanGhi: String(rows[i][0]),
+      MaNhanVien: String(rows[i][1] || ''),
+      HoTen: String(rows[i][2] || ''),
+      PhongBan: String(rows[i][3] || ''),
+      NgayChamCong: normalizeDateString(rows[i][4]),
+      GioChamCong: normalizeClockString(d[5] !== undefined && d[5] !== '' ? d[5] : rows[i][5]),
+      LoaiChamCong: String(rows[i][6] || 'VaoCa'),
+      CaLamViec: String(rows[i][7] || 'CaSang'),
+      ViDo: toNumber(rows[i][8], 0),
+      KinhDo: toNumber(rows[i][9], 0),
+      KhoangCachDenPhongKham: toNumber(rows[i][10], 0),
+      TrangThai: String(rows[i][11] || 'HopLe'),
+      MaPhienQR: String(rows[i][12] || ''),
+      NguonGhiNhan: String(rows[i][13] || 'QR_Web'),
+      GhiChu: String(rows[i][14] || '')
+    });
+  }
+  return { status: 'success', records: records };
 }
 
 function addStaff(data) {
@@ -782,6 +818,33 @@ function normalizeTimeString(val) {
   if (/pm/i.test(s) && h < 12) h += 12;
   if (/am/i.test(s) && h === 12) h = 0;
   return pad2(h) + ':' + m[2];
+}
+
+// Chuẩn hóa về "HH:mm:ss"
+function normalizeClockString(val) {
+  if (val === null || val === undefined || val === '') return '';
+  if (val instanceof Date) {
+    return pad2(val.getHours()) + ':' + pad2(val.getMinutes()) + ':' + pad2(val.getSeconds());
+  }
+  var s = String(val).trim();
+  var m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return s;
+  var h = parseInt(m[1], 10);
+  if (/pm/i.test(s) && h < 12) h += 12;
+  if (/am/i.test(s) && h === 12) h = 0;
+  return pad2(h) + ':' + m[2] + ':' + (m[3] || '00');
+}
+
+// Chuẩn hóa ngày về "yyyy-MM-dd"
+function normalizeDateString(val) {
+  if (val === null || val === undefined || val === '') return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, TIMEZONE, 'yyyy-MM-dd');
+  }
+  var s = String(val).trim();
+  var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + pad2(Number(m[2])) + '-' + pad2(Number(m[3]));
+  return s;
 }
 
 function createJsonResponse(data) {

@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Staff, AttendanceRecord } from '../types';
 import { gasService } from '../services/gasService';
-import { Download, Filter, Search, Calendar, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import { Download, Filter, Search, Calendar, CheckCircle2, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 
 interface AttendanceHistoryProps {
   currentUser: Staff;
@@ -14,8 +14,24 @@ export const AttendanceHistory: React.FC<AttendanceHistoryProps> = ({ currentUse
   const [filterType, setFilterType] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
+  const [allRecords, setAllRecords] = useState<AttendanceRecord[]>(() =>
+    gasService.getAllAttendanceRecords()
+  );
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  const allRecords = gasService.getAllAttendanceRecords();
+  const syncFromSheets = async () => {
+    setIsSyncing(true);
+    try {
+      const records = await gasService.fetchAttendanceFromGas();
+      setAllRecords(records);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    syncFromSheets();
+  }, []);
 
   // Filter records for this user or all if Admin viewing
   const userRecords = useMemo(() => {
@@ -95,6 +111,15 @@ export const AttendanceHistory: React.FC<AttendanceHistoryProps> = ({ currentUse
               onChange={e => setSelectedMonth(e.target.value)}
               className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-mono bg-white text-slate-800"
             />
+            <button
+              onClick={syncFromSheets}
+              disabled={isSyncing}
+              title="Tải lại lịch sử chấm công mới nhất từ Google Sheets"
+              className="px-3 py-1.5 text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 transition-colors flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-wait"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ'}
+            </button>
             <button
               onClick={handleExportCSV}
               className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5"

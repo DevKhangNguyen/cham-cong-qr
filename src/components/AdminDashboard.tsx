@@ -73,7 +73,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   const refreshAllData = async () => {
     const staff = await gasService.fetchStaffFromGas();
     setStaffList(staff);
-    setAttendanceRecords(gasService.getAllAttendanceRecords());
+    const records = await gasService.fetchAttendanceFromGas();
+    setAttendanceRecords(records);
     const shifts = await gasService.fetchShiftsFromGas();
     setShifts(shifts);
     setAdjustmentRequests(gasService.getAdjustmentRequests());

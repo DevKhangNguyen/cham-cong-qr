@@ -637,6 +637,37 @@ class GasDataService {
     return JSON.parse(localStorage.getItem(STORAGE_KEY_ATTENDANCE) || '[]');
   }
 
+  /** Tải lịch sử chấm công từ Google Sheets, gộp với bản ghi local rồi lưu lại. */
+  public async fetchAttendanceFromGas(): Promise<AttendanceRecord[]> {
+    if (!this.gasUrl) return this.getAllAttendanceRecords();
+    try {
+      const response = await fetch(this.gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'GET_ATTENDANCE_LIST' }),
+      });
+      const json = await response.json();
+      if (json.status === 'success' && Array.isArray(json.records)) {
+        const byId = new Map<string, AttendanceRecord>();
+        for (const r of json.records as AttendanceRecord[]) {
+          byId.set(r.MaBanGhi, r);
+        }
+        // Giữ lại bản ghi local chưa kịp đồng bộ (nếu có)
+        for (const r of this.getAllAttendanceRecords()) {
+          if (!byId.has(r.MaBanGhi)) byId.set(r.MaBanGhi, r);
+        }
+        const merged = Array.from(byId.values()).sort((a, b) =>
+          (b.NgayChamCong + ' ' + b.GioChamCong).localeCompare(a.NgayChamCong + ' ' + a.GioChamCong)
+        );
+        localStorage.setItem(STORAGE_KEY_ATTENDANCE, JSON.stringify(merged));
+        return merged;
+      }
+    } catch (err) {
+      console.warn('fetchAttendanceFromGas error:', err);
+    }
+    return this.getAllAttendanceRecords();
+  }
+
   // --- STAFF MANAGEMENT ---
   public getAllStaff(): Staff[] {
     return JSON.parse(localStorage.getItem(STORAGE_KEY_STAFF) || '[]');
